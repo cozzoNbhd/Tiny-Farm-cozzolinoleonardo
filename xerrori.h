@@ -16,7 +16,6 @@
 #include <sys/stat.h>        /* For mode constants */
 #include <fcntl.h>           /* For O_* constants */
 
-
 // termina programma
 void termina(const char *s); 
 void xtermina(const char *s, int linea, char *file); 
