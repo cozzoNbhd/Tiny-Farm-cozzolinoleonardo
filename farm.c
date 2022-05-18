@@ -1,5 +1,24 @@
 #include "xerrori.h"
 
+#include <unistd.h>
+
+#define QUI __LINE__, __FILE__
+
+bool isNumber(char number[]) {
+	int i = 0;
+
+	//checking for negative numbers
+	if (number[0] == '-')
+			i = 1;
+	for (; number[i] != 0; i++)
+	{
+			//if (number[i] > '9' || number[i] < '0')
+			if (!isdigit(number[i]))
+					return false;
+	}
+	return true;
+}
+
 int main(int argc, char *argv[]) {
 	
 	// controlla numero argomenti
@@ -8,34 +27,35 @@ int main(int argc, char *argv[]) {
 		return 1;
   }
 
-	int nthreadflag = 0;
-  int qlenflag = 0;
-	int delatyflag = 0;
-
-	int nthread = 0;
-	int qlen = 0;
+  int c;
+	int nthread = 4;
+	int qlen = 8;
 	int delay = 0;
 
-  int c;
-	char *value;
-
-
-  while ((c = getopt (argc, argv, value)) != -1) {
+  while ((c = getopt (argc, argv, "n:q:t:")) != -1) {
     switch (c) {
       case 'n':
-        nthreadflag = 1;
-				printf("%s", value);
+				if (!isNumber(optarg))
+					xtermina("Il valore passato in -n NON è un numero intero!\n", QUI);
+				nthread = atoi(optarg);
         break;
       case 'q':
-        qlenflag = 1;
-				printf("%s", value);
+				if (!isNumber(optarg))
+					xtermina("Il valore passato in -q NON è un numero intero!\n", QUI);
+				qlen = atoi(optarg);
         break;
       case 't':
-        delatyflag = 0;
-				printf("%s", value);
+				if (!isNumber(optarg))
+					xtermina("Il valore passato in -t NON è un numero intero!\n", QUI);
+				delay = atoi(optarg);
         break;
-		}
+	 	}
 	}
+
+	printf("Il numero di thread da usare è %d \n", nthread);
+	printf("La lunghezza del buffer è %d \n", qlen);
+	printf("Il delay del programma è %d \n", delay);
+	
 	
 	return 0;
 }
