@@ -11,30 +11,33 @@ int delay = 0;
 
 bool isNumber(char number[]) {
 	int i = 0;
-
 	//checking for negative numbers
 	if (number[0] == '-')
-			i = 1;
-	for (; number[i] != 0; i++)
-	{
-			//if (number[i] > '9' || number[i] < '0')
-			if (!isdigit(number[i]))
-					return false;
+		i = 1;
+	for (; number[i] != 0; i++) {
+		//if (number[i] > '9' || number[i] < '0')
+		if (!isdigit(number[i]))
+			return false;
 	}
 	return true;
 }
 
-// struct worker
+// struct generico worker
 typedef struct {
 	int *cindex; // indice del buffer
-	char **buffer; // buffer (array di stringhe)
+	char **buffer; // buffer (array di stringhe contenente i nomi dei file)
 	pthread_mutex_t *cmutex; 
 	int *somma; // valore che contiene la somma calcolata da ciascun worker
 	sem_t *sem_free_slots;
 	sem_t *sem_data_items;
 } wdati;
 
-// funzione eseguita da tutti i consumatori
+// struct del gestore
+typedef struct {
+	bool *termina;
+} gdati;
+
+// funzione eseguita da tutti i workers
 void *tbodyw (void *arg) {
 	
 	wdati *a = (wdati *) arg;
@@ -116,6 +119,43 @@ void *tbodyw (void *arg) {
 	
 }
 
+// thread che effettua la gestione del segnale SIGINT
+void *fgestore(void *arg) {
+
+	gdati *g = (gdati *) arg;
+	
+	// definisco la maschera dei segnali
+	sigset_t mask;
+  sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGUSR2);
+	
+	// variabile in cui memorizzo i segnali che mi arrivano
+  int s;
+	
+  while(true) {
+		int e = sigwait(&mask, &s);
+		if(e != 0) perror("Errore sigwait");
+
+		printf("Ho ricevuto il segnale SIGINT!\n");
+		
+		if (s == SIGINT) {
+			*(g->termina) = true;
+			pthread_exit(NULL);
+		}
+
+		if (s == SIGUSR2) {
+			pthread_exit(NULL);
+		}
+  }
+
+  return NULL;
+	
+}
+
+
+
+
 int main(int argc, char *argv[]) {
 
 	// controlla numero argomenti
@@ -123,6 +163,13 @@ int main(int argc, char *argv[]) {
 		printf("Uso: %s file [file ...] \n",argv[0]);
 		return 1;
   }
+
+	// blocco i segnali che voglio far gestire il gestore
+	sigset_t mask;
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGUSR2);
+	pthread_sigmask(SIG_BLOCK, &mask, NULL);
 
   int c;
 	int skip = 0;
@@ -150,10 +197,6 @@ int main(int argc, char *argv[]) {
 	 	}
 	}
 
-	printf("Il numero di thread da usare è %d \n", nthread);
-	printf("La lunghezza del buffer è %d \n", qlen);
-	printf("Il delay del programma è %d \n", delay);
-
 	// creazione buffer produttori consumatori e relativi semafori
 	char *buffer[qlen];
 	sem_t sem_free_slots, sem_data_items;
@@ -166,15 +209,28 @@ int main(int argc, char *argv[]) {
 	int windex = 0;
 	pthread_mutex_t wmutex = PTHREAD_MUTEX_INITIALIZER;
 	
-	// creo l'array di thread consumatori e l'informazione che deve
-	// portare ciascun consumatore
+	// creo l'array di thread  workers 
 	pthread_t workers[nthread];
+
+	// creo l'informazione che deve portare ciascun worker
 	wdati a;
 	a.buffer = buffer;
 	a.cindex = &windex;
 	a.cmutex = &wmutex;
 	a.sem_data_items = &sem_data_items;
 	a.sem_free_slots = &sem_free_slots;
+
+	// variabile di terminazione condivisa tra masterworker e gestore
+	bool fine = false;
+
+	// definisco il thread gestore e i dati che gli serviranno
+	pthread_t pgestore;
+	gdati g;
+	g.termina = &fine;
+
+	// lancio il gestore dei segnali
+	if (xpthread_create(&pgestore, NULL, fgestore, &g, QUI) != 0)
+		termina("Errore creazione thread");
 
 	// lancio i workers
 	for (int i = 0; i < nthread; i++) 
@@ -185,8 +241,10 @@ int main(int argc, char *argv[]) {
 	int pindex = 0;
 	pthread_mutex_t pmutex = PTHREAD_MUTEX_INITIALIZER;
 
-	
+	// inserisco nel buffer i nomi dei file da processare
 	for (int j = skip + 1; j < argc ; j++) {
+		
+		if (fine) break;
 		
 		xsem_wait(&sem_free_slots, QUI);
 		xpthread_mutex_lock(&pmutex, QUI);
@@ -196,10 +254,20 @@ int main(int argc, char *argv[]) {
 
 		xpthread_mutex_unlock(&pmutex, QUI);
 		xsem_post(&sem_data_items, QUI);
+
+		sleep(delay);
 		
 	}
 
-	// invio valore di terminazione ai consumatori
+	// se sono uscito perché ho processato tutti i nomi di file, termino il gestore
+	if (fine == false) {
+		pthread_kill(pgestore, SIGUSR2);
+	}
+
+	// join del thread gestore
+	xpthread_join(pgestore, NULL, QUI);
+	
+	// invio valore di terminazione ai workers
 	for (int i = 0; i < nthread; i++) {
 		
 		xsem_wait(&sem_free_slots, QUI);
@@ -213,9 +281,10 @@ int main(int argc, char *argv[]) {
 		
 	}
 
- 	// join dei thread consumatori
+ 	// join dei thread workers
   for (int i = 0; i < nthread; i++)
     xpthread_join(workers[i], NULL, QUI);
 	
 	return 0;
+	
 }
