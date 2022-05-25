@@ -1,6 +1,11 @@
 #include "xerrori.h"
 #include <ctype.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+
+#define HOST "127.0.0.1"
+#define PORT 65432
 
 #define QUI __LINE__, __FILE__
 
@@ -8,6 +13,57 @@ int nthread = 4;
 int qlen = 8;
 int delay = 0;
 
+/* Read "n" bytes from a descriptor */
+ssize_t readn(int fd, void *ptr, size_t n) {
+ 	size_t nleft;
+ 	ssize_t nread;
+ 
+ 	nleft = n;
+ 	while (nleft > 0) {
+		if ((nread = read(fd, ptr, nleft)) < 0) {
+			if (nleft == n) return -1; /* error, return -1 */
+				else break; /* error, return amount read so far */
+		} else if (nread == 0) break; /* EOF */
+	 	nleft -= nread;
+	 	ptr   += nread;
+ 	}
+ 	return (n - nleft); /* return >= 0 */
+}
+
+
+/* Write "n" bytes to a descriptor */
+ssize_t writen(int fd, void *ptr, size_t n) {  
+	size_t nleft;
+ 	ssize_t nwritten;
+ 
+ 	nleft = n;
+ 	while (nleft > 0) {
+	 	if ((nwritten = write(fd, ptr, nleft)) < 0) {
+			if (nleft == n) return -1; /* error, return -1 */
+			else break; /* error, return amount written so far */
+	 	} else if (nwritten == 0) break; 
+	 	nleft -= nwritten;
+	 	ptr   += nwritten;
+ 	}
+ 	return(n - nleft); /* return >= 0 */
+}
+
+typedef unsigned char BYTE;
+
+// funzione per convertire una stringa in un array di byte
+void encode(char* input, BYTE* output) {
+	
+	int loop;
+	int i;
+	
+	loop = 0;
+	i = 0;
+	
+	while (input[loop] != '\0') {
+		output[i++] = input[loop++];
+	}
+
+}
 
 bool isNumber(char number[]) {
 	int i = 0;
@@ -37,6 +93,16 @@ typedef struct {
 	bool *termina;
 } gdati;
 
+int numeroCifre(long long n) {  
+	int counter=0; // variable declaration  
+	while (n != 0) {  
+		n = n / 10;  
+		counter++;  
+	}  
+	return counter;  
+}
+
+
 // funzione eseguita da tutti i workers
 void *tbodyw (void *arg) {
 	
@@ -58,6 +124,27 @@ void *tbodyw (void *arg) {
 
 	long somma = 0, t;
 
+	// ----------------- dati relativi al socket -----------
+	size_t e1;
+	int tmp;
+	
+	int dim;
+	
+
+	int fd_skt_w = 0; // file descriptor associato al socket
+	struct sockaddr_in serv_addr;
+
+	// crea socket
+	if ((fd_skt_w = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
+		termina("Errore creazione socket");
+
+	// assegna indirizzo
+	serv_addr.sin_family = AF_INET;
+
+	// il numero della porta deve essere convertito in network order 
+	serv_addr.sin_port = htons(PORT);
+	serv_addr.sin_addr.s_addr = inet_addr(HOST);
+	
 	do {
 		
 		xsem_wait(a->sem_data_items, QUI);
@@ -73,8 +160,6 @@ void *tbodyw (void *arg) {
 		if (strcmp("-1", nome_file) == 0) break;
 		
 		// processo il dato prelevato
-		printf("Ricevuto: %s \n", nome_file);
-		
 		f = fopen(nome_file, "r");
 		if (f == NULL) xtermina("Errore apertura file\n", QUI);
 
@@ -95,26 +180,61 @@ void *tbodyw (void *arg) {
 		if (e != N)
 	  	termina("Errore lettura");
 
+		// calcolo la somma con la formula
 		for (int i = 0; i < N; i++) {
 			somma += i * file[i];
 		}
-
-		printf("Ho calcolato il valore %ld \n", somma);
 		
-		// accedo alla sezione critica
-		xpthread_mutex_lock(a->cmutex, QUI);
+		// -------- invio i valori al server ------------
 
-		// invio il segnale al thread gestore dei segnali
-		// kill(getpid(), SIGINT);
+		dim = strlen(nome_file);
+		
+		// apre connessione
+		if (connect(fd_skt_w, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0) {
+			xtermina("Errore apertura connessione! \n", QUI);
+		}	
 
-		// esco dalla sezione critica
-		xpthread_mutex_unlock(a->cmutex, QUI); 
+		// ottengo il numero di cifre di somma (convertendola inizialmente a string
+		// in modo tale da riuscire a catturare correttamente il segno
+		char temp[100];
+		sprintf(temp, "%ld", somma);
+		int cif = strlen(temp);
+		
+		// invio il numero di cifre della somma
+		tmp = htonl(cif);
+	  e1 = writen(fd_skt_w, &tmp, sizeof(tmp));
+	  if (e1 != sizeof(int)) termina("Errore write");
 
-		// resetto la variabile somma
-		somma = 0;
+		// invio la dimensione del file
+		tmp = htonl(dim);
+	  e1 = writen(fd_skt_w, &tmp, sizeof(tmp));
+	  if (e1 != sizeof(int)) termina("Errore write");
+
+		// aspetto il check dell'avvenuto ricevimento delle dimensioni
+		e1 = readn(fd_skt_w, &tmp, sizeof(tmp));
+	  if (e1 != sizeof(int)) termina("Errore read");
+	  int n = ntohl(tmp);
+
+		// if (n != 1) xtermina("Hack??", QUI);
+		assert(n == 1);
+
+		// inizializzo la variabile size come la somma delle dimensioni
+		int size = cif + dim;
+
+		// preparo il buffer contenente i dati da inviare
+		char *buffer = malloc(size * sizeof(char));
+		sprintf(buffer, "%ld%s", somma, nome_file);
+
+		// invio il buffer contenente i dati al server
+	  e1 = writen(fd_skt_w, buffer, size);
+	  if (e1 != size) termina("Errore write");
+
+		// chiudo la connessione
+		if (close(fd_skt_w) < 0)
+			perror("Errore chiusura socket");
 		
 	} while (true);
-
+	
 	pthread_exit(NULL);
 	
 }
@@ -136,10 +256,9 @@ void *fgestore(void *arg) {
   while(true) {
 		int e = sigwait(&mask, &s);
 		if(e != 0) perror("Errore sigwait");
-
-		printf("Ho ricevuto il segnale SIGINT!\n");
 		
 		if (s == SIGINT) {
+			printf("\nHo ricevuto il segnale SIGINT, terminazione in corso...\n");
 			*(g->termina) = true;
 			pthread_exit(NULL);
 		}
@@ -284,6 +403,46 @@ int main(int argc, char *argv[]) {
  	// join dei thread workers
   for (int i = 0; i < nthread; i++)
     xpthread_join(workers[i], NULL, QUI);
+
+	// --- invio segnale di terminazione al server ---
+	
+	int fd_skt = 0; // file descriptor associato al socket
+  struct sockaddr_in serv_addr;
+
+  // crea socket
+  if ((fd_skt = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
+    termina("Errore creazione socket");
+
+  // assegna indirizzo
+  serv_addr.sin_family = AF_INET;
+
+  // il numero della porta deve essere convertito in network order 
+  serv_addr.sin_port = htons(PORT);
+  serv_addr.sin_addr.s_addr = inet_addr(HOST);
+
+	
+	
+  // apre connessione
+	if (connect(fd_skt, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0) {
+		xtermina("Errore apertura connessione! \n", QUI);
+	}
+
+	size_t e;
+	int tmp;
+
+	
+	tmp = htonl(-1);
+	e = writen(fd_skt, &tmp, sizeof(tmp));
+	if (e != sizeof(int)) termina("Errore write");
+
+	tmp = htonl(-1);
+	e = writen(fd_skt, &tmp, sizeof(tmp));
+	if (e != sizeof(int)) termina("Errore write");
+	
+	// chiudo la connessione
+  if (close(fd_skt) < 0)
+    perror("Errore chiusura socket");
+
 	
 	return 0;
 	
