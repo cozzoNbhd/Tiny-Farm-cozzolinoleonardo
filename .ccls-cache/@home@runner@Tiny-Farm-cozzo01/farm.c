@@ -30,7 +30,6 @@ ssize_t readn(int fd, void *ptr, size_t n) {
  	return (n - nleft); /* return >= 0 */
 }
 
-
 /* Write "n" bytes to a descriptor */
 ssize_t writen(int fd, void *ptr, size_t n) {  
 	size_t nleft;
@@ -50,28 +49,13 @@ ssize_t writen(int fd, void *ptr, size_t n) {
 
 typedef unsigned char BYTE;
 
-// funzione per convertire una stringa in un array di byte
-void encode(char* input, BYTE* output) {
-	
-	int loop;
-	int i;
-	
-	loop = 0;
-	i = 0;
-	
-	while (input[loop] != '\0') {
-		output[i++] = input[loop++];
-	}
-
-}
-
+// Funzione per verificare se una data stringa o carattere rappresenta un numero
 bool isNumber(char number[]) {
 	int i = 0;
 	//checking for negative numbers
 	if (number[0] == '-')
 		i = 1;
 	for (; number[i] != 0; i++) {
-		//if (number[i] > '9' || number[i] < '0')
 		if (!isdigit(number[i]))
 			return false;
 	}
@@ -93,28 +77,18 @@ typedef struct {
 	bool *termina;
 } gdati;
 
-int numeroCifre(long long n) {  
-	int counter=0; // variable declaration  
-	while (n != 0) {  
-		n = n / 10;  
-		counter++;  
-	}  
-	return counter;  
-}
-
 
 // funzione eseguita da tutti i workers
 void *tbodyw (void *arg) {
 	
 	wdati *a = (wdati *) arg;
 
-	/*
-	// blocco segnali che non voglio ricevere
+	// blocco i segnali che voglio far gestire il gestore
 	sigset_t mask;
-  sigfillset(&mask); // insieme di tutti i segnali
-  sigdelset(&mask, SIGQUIT); // elimino sigquit
-  pthread_sigmask(SIG_BLOCK, &mask, NULL); // blocco tutto tranne sigquit
-	*/
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGUSR2);
+	pthread_sigmask(SIG_BLOCK, &mask, NULL);
 	
 	char *nome_file;
 	FILE *f;
@@ -159,7 +133,9 @@ void *tbodyw (void *arg) {
 		// controllo di uscita
 		if (strcmp("-1", nome_file) == 0) break;
 		
-		// processo il dato prelevato
+		// ---- processo il dato prelevato ----
+
+		// Apro il file
 		f = fopen(nome_file, "r");
 		if (f == NULL) xtermina("Errore apertura file\n", QUI);
 
@@ -181,9 +157,8 @@ void *tbodyw (void *arg) {
 	  	termina("Errore lettura");
 
 		// calcolo la somma con la formula
-		for (int i = 0; i < N; i++) {
+		for (int i = 0; i < N; i++)
 			somma += i * file[i];
-		}
 		
 		// -------- invio i valori al server ------------
 
@@ -293,6 +268,7 @@ int main(int argc, char *argv[]) {
   int c;
 	int skip = 0;
 
+	// Gestione dei parametri opzionali
   while ((c = getopt (argc, argv, "n:q:t:")) != -1) {
     switch (c) {
       case 'n':
@@ -378,7 +354,7 @@ int main(int argc, char *argv[]) {
 		
 	}
 
-	// se sono uscito perché ho processato tutti i nomi di file, termino il gestore
+	// se sono uscito perché ho processato tutti i nomi di file, termino il gestore inviandogli un segnale SIGUSR2
 	if (fine == false) {
 		pthread_kill(pgestore, SIGUSR2);
 	}
@@ -420,8 +396,6 @@ int main(int argc, char *argv[]) {
   serv_addr.sin_port = htons(PORT);
   serv_addr.sin_addr.s_addr = inet_addr(HOST);
 
-	
-	
   // apre connessione
 	if (connect(fd_skt, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0) {
 		xtermina("Errore apertura connessione! \n", QUI);
@@ -430,6 +404,7 @@ int main(int argc, char *argv[]) {
 	size_t e;
 	int tmp;
 
+	// Invio i valori speciali -1 e -1 per far terminare il server
 	
 	tmp = htonl(-1);
 	e = writen(fd_skt, &tmp, sizeof(tmp));
@@ -443,7 +418,6 @@ int main(int argc, char *argv[]) {
   if (close(fd_skt) < 0)
     perror("Errore chiusura socket");
 
-	
 	return 0;
 	
 }

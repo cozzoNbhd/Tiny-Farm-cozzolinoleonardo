@@ -72,7 +72,7 @@ def gestisci_connessione(conn,addr):
       nome_file = nome_file.decode("utf-8")
 
 			# stampo il risultato su stdout
-      print(f"{somma} {nome_file}")
+      print(f"{somma} {nome_file}", file = sys.stdout)
 
 
 # riceve esattamente n byte e li restituisce in un array di byte
