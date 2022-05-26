@@ -5,10 +5,11 @@
 #include <sys/socket.h>
 
 #define HOST "127.0.0.1"
-#define PORT 65432
+#define PORT 65399
 
 #define QUI __LINE__, __FILE__
 
+// Variabili globali utilizzate nel programma
 int nthread = 4;
 int qlen = 8;
 int delay = 0;
@@ -47,8 +48,6 @@ ssize_t writen(int fd, void *ptr, size_t n) {
  	return(n - nleft); /* return >= 0 */
 }
 
-typedef unsigned char BYTE;
-
 // Funzione per verificare se una data stringa o carattere rappresenta un numero
 bool isNumber(char number[]) {
 	int i = 0;
@@ -66,45 +65,47 @@ bool isNumber(char number[]) {
 typedef struct {
 	int *cindex; // indice del buffer
 	char **buffer; // buffer (array di stringhe contenente i nomi dei file)
-	pthread_mutex_t *cmutex; 
+	pthread_mutex_t *cmutex; // per gestire la mutua esclusione
 	int *somma; // valore che contiene la somma calcolata da ciascun worker
-	sem_t *sem_free_slots;
-	sem_t *sem_data_items;
+	sem_t *sem_free_slots; // semaforo per verificare che all'interno del buffer ci siano slot liberi
+	sem_t *sem_data_items; // semaforo per verificare che nel buffer ci siano elementi da consumare
 } wdati;
 
 // struct del gestore
 typedef struct {
-	bool *termina;
+	bool *termina; // per stabilire quando deve terminare
 } gdati;
 
 
 // funzione eseguita da tutti i workers
 void *tbodyw (void *arg) {
-	
+
+	// Eseguo il cast alla struct wdati
 	wdati *a = (wdati *) arg;
 
 	// blocco i segnali che voglio far gestire il gestore
-	sigset_t mask;
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGINT);
-	sigaddset(&mask, SIGUSR2);
-	pthread_sigmask(SIG_BLOCK, &mask, NULL);
-	
-	char *nome_file;
-	FILE *f;
-	int e;
+	sigset_t mask; // definisco la maschera dei segnali
+	sigemptyset(&mask); // inizializzo la maschera vuota
+	sigaddset(&mask, SIGINT); // aggiungo alla maschera il segnale SIGINT
+	sigaddset(&mask, SIGUSR2); // aggiungo alla maschera il segnale SIGUSR2
+	pthread_sigmask(SIG_BLOCK, &mask, NULL); // specifico al thread worker che deve bloccare i segnali
+	// specificati dalla maschera, in questo caso solo SIGINT e SIGUSR2
+
+	char *nome_file; // variabile in cui salvo il nome del file prelevato dal buffer
+	FILE *f; // variabile di tipo FILE che uso per aprire il file
+	int e; // variabile in cui memorizzo il risultato di molteplicità funzioni di libreria
 
 	int N; // dimensione dell'array che rappresenta il file di long
 
-	long somma = 0, t;
+	long somma = 0, t; // variabile in cui memorizzo la somma calcolata dal generico worker e variabile
+	// in cui salvo il numero di byte contenuti all'interno del file che apro
 
 	// ----------------- dati relativi al socket -----------
-	size_t e1;
-	int tmp;
+	size_t e1; // variabile che uso per memorizzare il risultato delle chiamate relative al socket
+	int tmp; // variabile in cui memorizzo l'informazione che voglio mandare sotto forma di byte
+	 
+	int dim; // variabile in cui memorizzo la dimensione del file da processare
 	
-	int dim;
-	
-
 	int fd_skt_w = 0; // file descriptor associato al socket
 	struct sockaddr_in serv_addr;
 
@@ -121,17 +122,17 @@ void *tbodyw (void *arg) {
 	
 	do {
 		
-		xsem_wait(a->sem_data_items, QUI);
-		xpthread_mutex_lock(a->cmutex, QUI);
+		xsem_wait(a->sem_data_items, QUI); // aspetto che ci siano elementi da prelevare
+		xpthread_mutex_lock(a->cmutex, QUI); // accedo alla sezione critica
 		
-		nome_file = a->buffer[*(a->cindex) % qlen];
-		*(a->cindex) += 1;
+		nome_file = a->buffer[*(a->cindex) % qlen]; // prelevo l'elemento dal buffer
+		*(a->cindex) += 1; // incremento il contatore
 
-		xpthread_mutex_unlock(a->cmutex, QUI); 
-		xsem_post(a->sem_free_slots, QUI);
+		xpthread_mutex_unlock(a->cmutex, QUI); // esco dalla sezione critica
+		xsem_post(a->sem_free_slots, QUI); // avverto gli altri worker che c'è uno slot libero 
 
 		// controllo di uscita
-		if (strcmp("-1", nome_file) == 0) break;
+		if (strcmp("-1", nome_file) == 0) break; // se ho ricevuto la stringa speciale "-1", esco dal ciclo
 		
 		// ---- processo il dato prelevato ----
 
@@ -139,20 +140,24 @@ void *tbodyw (void *arg) {
 		f = fopen(nome_file, "r");
 		if (f == NULL) xtermina("Errore apertura file\n", QUI);
 
+		// calcolo la dimensione (numero di caratteri) del nome del file (mi servirà dopo...)
+		dim = strlen(nome_file);
+
 		//calcolo dimensione del file
-		e = fseek(f, 0, SEEK_END); //sposto il puntatore in fondo
+		e = fseek(f, 0, SEEK_END); //sposto il puntatore in fondo al file
 		if (e != 0) termina("Errore fseek");
-		t = ftell(f); 
+		t = ftell(f); // calcolo il numero di byte del file binario dall'inizio del file fino alla fine
 		if (t < 0) termina("Errore ftell");
 	
-		N = t / 8;
+		N = t / 8; // trovo il numero di elementi dividendo il numero di byte per 8 (dimensione di un long)
 		
 		// ritorno all'inizio del file
 		rewind(f);
 
+		// inizializzo un array di long che conterrà tutti i long del file
 		long file[N];
 
-		e = fread(file, sizeof(long), N, f);
+		e = fread(file, sizeof(long), N, f); // leggo dal file f esattamente N long e memorizzo il contenuto nell'array file
 		if (e != N)
 	  	termina("Errore lettura");
 
@@ -161,37 +166,34 @@ void *tbodyw (void *arg) {
 			somma += i * file[i];
 		
 		// -------- invio i valori al server ------------
-
-		dim = strlen(nome_file);
-		
+	
 		// apre connessione
 		if (connect(fd_skt_w, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0) {
 			xtermina("Errore apertura connessione! \n", QUI);
 		}	
 
-		// ottengo il numero di cifre di somma (convertendola inizialmente a string
-		// in modo tale da riuscire a catturare correttamente il segno
-		char temp[100];
-		sprintf(temp, "%ld", somma);
-		int cif = strlen(temp);
+		// ottengo il numero di cifre di somma (convertendo somma inizialmente a string in modo tale da riuscire a catturare correttamente il segno
+		char temp[100]; // 100 è un valore che mi fa stare tranquillo (difficile che avrò un long che ha 100 cifre!)
+		sprintf(temp, "%ld", somma); // mediante la funzione sprintf, memorizzo all'interno di temp il valore somma
+		int cif = strlen(temp); // dal momento che dopo la sprintf la dimensione di temp diventa pari alla dimensione del numero appena inserito
+		// (ossia al numero di cifre di somma), posso memorizzare all'interno della variabile cif la dimensione di temp
 		
 		// invio il numero di cifre della somma
-		tmp = htonl(cif);
-	  e1 = writen(fd_skt_w, &tmp, sizeof(tmp));
+		tmp = htonl(cif); // converto il numero cif in byte
+	  e1 = writen(fd_skt_w, &tmp, sizeof(tmp)); // invio mediante il socket il contenuto di cif
 	  if (e1 != sizeof(int)) termina("Errore write");
 
 		// invio la dimensione del file
-		tmp = htonl(dim);
-	  e1 = writen(fd_skt_w, &tmp, sizeof(tmp));
+		tmp = htonl(dim); // converto la dimensione del file in byte
+	  e1 = writen(fd_skt_w, &tmp, sizeof(tmp)); // invio mediante il socket il contenuto di dim
 	  if (e1 != sizeof(int)) termina("Errore write");
 
-		// aspetto il check dell'avvenuto ricevimento delle dimensioni
-		e1 = readn(fd_skt_w, &tmp, sizeof(tmp));
+		// aspetto il check dell'avvenuto ricevimento delle dimensioni da parte del Server
+		e1 = readn(fd_skt_w, &tmp, sizeof(tmp)); // leggo mediante il socket e memorizzo all'interno di temp il contenuto
 	  if (e1 != sizeof(int)) termina("Errore read");
-	  int n = ntohl(tmp);
+	  int n = ntohl(tmp); // converto mediante ntohl i byte in un valore intero
 
-		// if (n != 1) xtermina("Hack??", QUI);
-		assert(n == 1);
+		assert(n == 1); // Il server mi invierà il valore 1 come check
 
 		// inizializzo la variabile size come la somma delle dimensioni
 		int size = cif + dim;
@@ -229,18 +231,20 @@ void *fgestore(void *arg) {
   int s;
 	
   while(true) {
-		int e = sigwait(&mask, &s);
+		
+		int e = sigwait(&mask, &s); // attendo l'arrivo dei segnali specificati dalla maschera
 		if(e != 0) perror("Errore sigwait");
 		
-		if (s == SIGINT) {
+		if (s == SIGINT) { // se ricevo il segnale SIGINT (CTRL-C)
 			printf("\nHo ricevuto il segnale SIGINT, terminazione in corso...\n");
-			*(g->termina) = true;
-			pthread_exit(NULL);
+			*(g->termina) = true; // setto la variabile termina a true
+			pthread_exit(NULL); // termino
 		}
 
-		if (s == SIGUSR2) {
-			pthread_exit(NULL);
+		if (s == SIGUSR2) { // se ricevo il segnale SIGUSR2
+			pthread_exit(NULL); // termino
 		}
+		
   }
 
   return NULL;
@@ -265,8 +269,12 @@ int main(int argc, char *argv[]) {
 	sigaddset(&mask, SIGUSR2);
 	pthread_sigmask(SIG_BLOCK, &mask, NULL);
 
-  int c;
-	int skip = 0;
+	// variabili che utilizzo per gestire i parametri opzionali
+  int c; // variabile in cui memorizzo il tipo di opzione
+	int skip = 0; // variabile in cui memorizzo il numero di opzioni specificate
+	// ogni volta che trovo un parametro opzionale, incremento di 2 la variabile skip
+	// questo mi servirà quando dovrò scorrere l'elenco di file, in quanto dovrò partire da skip fino ad
+	// arrivare alla fine di argv
 
 	// Gestione dei parametri opzionali
   while ((c = getopt (argc, argv, "n:q:t:")) != -1) {
@@ -339,12 +347,13 @@ int main(int argc, char *argv[]) {
 	// inserisco nel buffer i nomi dei file da processare
 	for (int j = skip + 1; j < argc ; j++) {
 		
-		if (fine) break;
+		if (fine) break; // se la variabile fine è stata messa a 1 dal gestore, vuol dire che devo smettere di
+		// processare i file (anche se non sono finiti)
 		
 		xsem_wait(&sem_free_slots, QUI);
 		xpthread_mutex_lock(&pmutex, QUI);
 		
-		buffer[pindex % qlen] = argv[j];
+		buffer[pindex % qlen] = argv[j]; // inserisco nel buffer uno ad uno i nomi dei file
 		pindex += 1;
 
 		xpthread_mutex_unlock(&pmutex, QUI);
@@ -354,7 +363,8 @@ int main(int argc, char *argv[]) {
 		
 	}
 
-	// se sono uscito perché ho processato tutti i nomi di file, termino il gestore inviandogli un segnale SIGUSR2
+	// se sono uscito perché ho processato tutti i nomi di file (quindi la variabile fine è rimasta a false) termino 
+	// il gestore inviandogli un segnale SIGUSR2
 	if (fine == false) {
 		pthread_kill(pgestore, SIGUSR2);
 	}
