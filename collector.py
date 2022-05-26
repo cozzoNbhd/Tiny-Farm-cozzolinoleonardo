@@ -1,7 +1,11 @@
 #! /usr/bin/env python3
 # server che fornisce l'elenco dei primi in un dato intervallo 
 # gestisce più clienti contemporaneamente usando i thread
-import sys, struct, socket, threading, os, signal
+import sys, struct, socket, threading, os, signal, stat
+
+st = os.stat('collector.py')
+
+os.chmod('collector.py', st.st_mode | stat.S_IEXEC)
 
 # host e porta di default
 HOST = "127.0.0.1"  # Standard loopback interface address (localhost)
