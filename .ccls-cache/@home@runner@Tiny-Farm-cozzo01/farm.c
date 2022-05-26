@@ -111,7 +111,7 @@ void *tbodyw (void *arg) {
 
 	// crea socket
 	if ((fd_skt_w = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
-		termina("Errore creazione socket");
+		xtermina("Errore creazione socket", QUI);
 
 	// assegna indirizzo
 	serv_addr.sin_family = AF_INET;
@@ -145,9 +145,9 @@ void *tbodyw (void *arg) {
 
 		//calcolo dimensione del file
 		e = fseek(f, 0, SEEK_END); //sposto il puntatore in fondo al file
-		if (e != 0) termina("Errore fseek");
+		if (e != 0) xtermina("Errore fseek", QUI);
 		t = ftell(f); // calcolo il numero di byte del file binario dall'inizio del file fino alla fine
-		if (t < 0) termina("Errore ftell");
+		if (t < 0) xtermina("Errore ftell", QUI);
 	
 		N = t / 8; // trovo il numero di elementi dividendo il numero di byte per 8 (dimensione di un long)
 		
@@ -159,7 +159,7 @@ void *tbodyw (void *arg) {
 
 		e = fread(file, sizeof(long), N, f); // leggo dal file f esattamente N long e memorizzo il contenuto nell'array file
 		if (e != N)
-	  	termina("Errore lettura");
+	  	xtermina("Errore lettura", QUI);
 
 		// calcolo la somma con la formula
 		for (int i = 0; i < N; i++)
@@ -181,16 +181,16 @@ void *tbodyw (void *arg) {
 		// invio il numero di cifre della somma
 		tmp = htonl(cif); // converto il numero cif in byte
 	  e1 = writen(fd_skt_w, &tmp, sizeof(tmp)); // invio mediante il socket il contenuto di cif
-	  if (e1 != sizeof(int)) termina("Errore write");
+	  if (e1 != sizeof(int)) xtermina("Errore write", QUI);
 
 		// invio la dimensione del file
 		tmp = htonl(dim); // converto la dimensione del file in byte
 	  e1 = writen(fd_skt_w, &tmp, sizeof(tmp)); // invio mediante il socket il contenuto di dim
-	  if (e1 != sizeof(int)) termina("Errore write");
+	  if (e1 != sizeof(int)) xtermina("Errore write", QUI);
 
 		// aspetto il check dell'avvenuto ricevimento delle dimensioni da parte del Server
 		e1 = readn(fd_skt_w, &tmp, sizeof(tmp)); // leggo mediante il socket e memorizzo all'interno di temp il contenuto
-	  if (e1 != sizeof(int)) termina("Errore read");
+	  if (e1 != sizeof(int)) xtermina("Errore read", QUI);
 	  int n = ntohl(tmp); // converto mediante ntohl i byte in un valore intero
 
 		assert(n == 1); // Il server mi invierà il valore 1 come check
@@ -204,11 +204,15 @@ void *tbodyw (void *arg) {
 
 		// invio il buffer contenente i dati al server
 	  e1 = writen(fd_skt_w, buffer, size);
-	  if (e1 != size) termina("Errore write");
+	  if (e1 != size) xtermina("Errore write", QUI);
 
 		// chiudo la connessione
 		if (close(fd_skt_w) < 0)
 			perror("Errore chiusura socket");
+
+		// chiudo il file
+		if (fclose(f) != 0) 
+			xtermina("Errore chiusura del file!\n", QUI);
 		
 	} while (true);
 	
@@ -333,12 +337,12 @@ int main(int argc, char *argv[]) {
 
 	// lancio il gestore dei segnali
 	if (xpthread_create(&pgestore, NULL, fgestore, &g, QUI) != 0)
-		termina("Errore creazione thread");
+		xtermina("Errore creazione thread", QUI);
 
 	// lancio i workers
 	for (int i = 0; i < nthread; i++) 
 		if (xpthread_create(&workers[i], NULL, tbodyw, &a, QUI) != 0)
-			termina("Errore creazione thread");
+			xtermina("Errore creazione thread", QUI);
 
 	// variabili che servono al produttore
 	int pindex = 0;
@@ -397,7 +401,7 @@ int main(int argc, char *argv[]) {
 
   // crea socket
   if ((fd_skt = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
-    termina("Errore creazione socket");
+    xtermina("Errore creazione socket", QUI);
 
   // assegna indirizzo
   serv_addr.sin_family = AF_INET;
@@ -418,11 +422,11 @@ int main(int argc, char *argv[]) {
 	
 	tmp = htonl(-1);
 	e = writen(fd_skt, &tmp, sizeof(tmp));
-	if (e != sizeof(int)) termina("Errore write");
+	if (e != sizeof(int)) xtermina("Errore write", QUI);
 
 	tmp = htonl(-1);
 	e = writen(fd_skt, &tmp, sizeof(tmp));
-	if (e != sizeof(int)) termina("Errore write");
+	if (e != sizeof(int)) xtermina("Errore write", QUI);
 	
 	// chiudo la connessione
   if (close(fd_skt) < 0)
