@@ -1,7 +1,7 @@
 # definizione del compilatore e dei flag di compilazione
 # che vengono usate dalle regole implicite
 CC=gcc
-CFLAGS=-g -Wall -O -std=c99 -DMAX_SIZE=4096
+CFLAGS=-g -Wall -O -std=c99
 LDLIBS=-lm -lrt -pthread
 
 # eseguibili da costruire

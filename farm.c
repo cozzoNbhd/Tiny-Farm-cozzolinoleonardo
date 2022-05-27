@@ -99,26 +99,6 @@ void *tbodyw (void *arg) {
 
 	long somma = 0, t; // variabile in cui memorizzo la somma calcolata dal generico worker e variabile
 	// in cui salvo il numero di byte contenuti all'interno del file che apro
-
-	// ----------------- dati relativi al socket -----------
-	size_t e1; // variabile che uso per memorizzare il risultato delle chiamate relative al socket
-	int tmp; // variabile in cui memorizzo l'informazione che voglio mandare sotto forma di byte
-	 
-	int dim; // variabile in cui memorizzo la dimensione del file da processare
-	
-	int fd_skt_w = 0; // file descriptor associato al socket
-	struct sockaddr_in serv_addr;
-
-	// crea socket
-	if ((fd_skt_w = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
-		xtermina("Errore creazione socket", QUI);
-
-	// assegna indirizzo
-	serv_addr.sin_family = AF_INET;
-
-	// il numero della porta deve essere convertito in network order 
-	serv_addr.sin_port = htons(PORT);
-	serv_addr.sin_addr.s_addr = inet_addr(HOST);
 	
 	do {
 		
@@ -141,7 +121,7 @@ void *tbodyw (void *arg) {
 		if (f == NULL) xtermina("Errore apertura file\n", QUI);
 
 		// calcolo la dimensione (numero di caratteri) del nome del file (mi servirà dopo...)
-		dim = strlen(nome_file);
+		int dim = strlen(nome_file);
 
 		//calcolo dimensione del file
 		e = fseek(f, 0, SEEK_END); //sposto il puntatore in fondo al file
@@ -166,7 +146,25 @@ void *tbodyw (void *arg) {
 			somma += i * file[i];
 		
 		// -------- invio i valori al server ------------
+
+		// ----------------- dati relativi al socket -----------
+		size_t e1; // variabile che uso per memorizzare il risultato delle chiamate relative al socket
+		int tmp; // variabile in cui memorizzo l'informazione che voglio mandare sotto forma di byte
+		
+		int fd_skt_w = 0; // file descriptor associato al socket
+		struct sockaddr_in serv_addr;
 	
+		// crea socket
+		if ((fd_skt_w = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
+			xtermina("Errore creazione socket", QUI);
+	
+		// assegna indirizzo
+		serv_addr.sin_family = AF_INET;
+	
+		// il numero della porta deve essere convertito in network order 
+		serv_addr.sin_port = htons(PORT);
+		serv_addr.sin_addr.s_addr = inet_addr(HOST);
+		
 		// apre connessione
 		if (connect(fd_skt_w, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0) {
 			xtermina("Errore apertura connessione! \n", QUI);
@@ -213,6 +211,8 @@ void *tbodyw (void *arg) {
 		// chiudo il file
 		if (fclose(f) != 0) 
 			xtermina("Errore chiusura del file!\n", QUI);
+
+		somma = 0;
 		
 	} while (true);
 	
@@ -254,8 +254,6 @@ void *fgestore(void *arg) {
   return NULL;
 	
 }
-
-
 
 
 int main(int argc, char *argv[]) {
